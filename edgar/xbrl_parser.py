@@ -8,6 +8,7 @@ import re
 import os, sys, shutil
 import numpy as np
 import glob
+from multiprocessing import Pool
 
 def get_xbrl_path(idx_path):
     try:
@@ -49,42 +50,10 @@ def get_current_df(xbrl_path):
                           'startDateTime',
                           'endDateTime'))
 
-#     arelle_df['Start'] = pd.to_datetime(arelle_df.Period.str.slice(0,10),errors='coerce')
-#     arelle_df['End'] = pd.to_datetime(arelle_df.Period.str.slice(10,),errors='coerce')
-#     arelle_df['isPeriod'] = pd.notnull(arelle_df.End)
-#     arelle_df['Days'] = (arelle_df.End - arelle_df.Start).dt.days
-
     arelle_df = arelle_df[(arelle_df.Fact.map(lambda f: f.isNumeric and not f.isNil))]# & #Fact is Numeric (i.e. can be converted to a number)
     #                                                 arelle_df.Account.map(lambda a: a=='us-gaap:EarningsPerShareBasic') & #Just Cash; Account mentions "Cash", anywhere would give us too many values
                                                     # arelle_df.Category.map(lambda c:not c))] # Could also use "~", which does boolean "not" on the entire column
 
-
-#     def get_contexts(arelle_df):
-#         top_days = arelle_df[arelle_df.isPeriod].Days.value_counts()
-#         top_periods = arelle_df[arelle_df.isPeriod].Period.value_counts()
-#         top_dates = arelle_df[~arelle_df.isPeriod].Period.value_counts()
-#         top_periods_df = top_periods.to_frame().reset_index()
-#         top_periods_df.columns = ['Period', 'count']
-#         top_periods_df['Start'] = pd.to_datetime(top_periods_df.Period.str.slice(0,10),errors='coerce')
-#         top_periods_df['End'] = pd.to_datetime(top_periods_df.Period.str.slice(10,),errors='coerce')
-#         top_periods_df['Days'] = (top_periods_df.End - top_periods_df.Start).dt.days
-#         current_days = list(filter(lambda x: (85<x<95) | (360<x<370), list(top_days.index)))[0]
-#         current_period = top_periods_df[top_periods_df.Days==current_days].sort_values('End',ascending=False).iloc[0].Period
-#         current_date = top_dates.index[:2].sort_values(ascending=False)[0]
-#         current_date_compare = top_dates.index[:2].sort_values(ascending=False)[1]
-#         current_period_ly = current_period.replace(current_period[:4],str(int(current_period[:4])-1))
-#         current_date_ly = current_date.replace(current_date[:4],str(int(current_date[:4])-1))
-#         return current_period, current_date, current_date_compare, current_period_ly, current_date_ly
-
-#     period_categories_df = pd.DataFrame({'PeriodCategory':['current_period','current_date','current_date_compare','current_period_ly','current_date_ly'],'Period':get_contexts(arelle_df)})
-
-#     arelle_df = arelle_df.merge(period_categories_df, on='Period', how='outer')
-#     arelle_df.Account = arelle_df.Account.astype(str)
-#     arelle_df = arelle_df.dropna(subset=['PeriodCategory','Account','Category'])
-
-#     current_period_df = arelle_df[(arelle_df.PeriodCategory=='current_period')&(~arelle_df.Category)]
-#     current_date_df = arelle_df[(arelle_df.PeriodCategory=='current_date')&(~arelle_df.Category)]
-#     current_df = pd.concat([current_period_df, current_date_df], ignore_index=True)
 
     file_path = arelle.webCache.getfilename(xbrl_path)
     if os.path.exists(file_path):
@@ -92,40 +61,108 @@ def get_current_df(xbrl_path):
     
     return arelle_df #current_df
 
-def run(ticker):
+def getCIK(ticker):
+    URL = 'http://www.sec.gov/cgi-bin/browse-edgar?CIK={}&Find=Search&owner=exclude&action=getcompany'
+    CIK_RE = re.compile(r'.*CIK=(\d{10}).*')    
+    f = requests.get(URL.format(ticker), stream = True)
+    results = CIK_RE.findall(f.text)
+    if len(results):
+        results[0] = int(re.sub('\.[0]*', '.', results[0]))
+        return str(results[0])
+    else:
+        return None
+
+def preprocess_df(df):
+    df.startDateTime = pd.to_datetime(df.startDateTime)
+    df.endDateTime = pd.to_datetime(df.endDateTime, errors='coerce')
+    df['Days'] = (df.endDateTime - df.startDateTime).dt.days
+    df.Value = df.Value.astype(float)
+    df.Account = df.Account.astype(str)
+    df['endDateTime2'] = df.endDateTime - pd.offsets.Day()
+    df = df[df.Category==False]
+    return df
+    
+def consolidate_periods(df):
+    df_t = df.copy()
+    df_t = df_t.drop_duplicates(subset=['Period'], keep='last')
+    df_t.sort_values(['startDateTime','endDateTime2'], inplace=True)
+    df_t['to_consolidate'] = df_t.startDateTime.duplicated(keep='first')
+    df_t['startDateTime2'] = df_t['startDateTime']
+    df_t['Value2'] = df_t['Value']
+    df_t.reset_index(drop=True, inplace=True)
+    
+    def consolidate(row):
+        if row.to_consolidate:
+            row.Value2 = row.Value - df_t.Value.iloc[row.name-1]
+            row.startDateTime2 = df_t.endDateTime.iloc[row.name-1]
+        return row
+    
+    if len(df_t)>1:
+        df_t = df_t.apply(consolidate, 1)
+        
+#     df_t = df_t.drop(['startDateTime','endDateTime','Value'],1)
+    df_t['Days2'] = (df_t.endDateTime2 - df_t.startDateTime2).dt.days + 1
+    df_t['Period2'] = df_t.startDateTime2.dt.strftime('%Y-%m-%d')+df_t.endDateTime2.dt.strftime('%Y-%m-%d')
+    
+    return df_t
+
+def get_consolidated_df(df):
+    df_t = df.query("isStartEndPeriod").copy()
+    df_t = df_t.groupby(['Account','startDateTime']).apply(consolidate_periods).reset_index(drop=True)
+    df_t = df_t.drop_duplicates(subset=['Account','startDateTime2','Period2'], keep='last')
+    
+    df_t2 = df.query('isStartEndPeriod==False').copy()
+    df_t2.sort_values(['startDateTime','endDateTime2'], inplace=True)
+    df_t2['to_consolidate'] = False
+    df_t2['startDateTime2'] = df_t2['startDateTime']
+    df_t2['Value2'] = df_t2['Value']
+    df_t2['Days2'] = df_t2['Days']
+    df_t2['Period2'] = df_t2['Period']
+    df_t2 = df_t2.drop_duplicates(subset=['Account','endDateTime2','Period2'], keep='last')
+    
+    df_all = pd.concat([df_t,df_t2], ignore_index=True, sort=False)
+    
+    return df_all
+    
+def run(ticker, outdir='currents'):
     try:
-        currents = [os.path.basename(f).replace('.pkl','') for f in glob.glob('currents/*')]
+        currents = [os.path.basename(f).replace('.pkl','') for f in glob.glob(os.path.join(outdir,'*.pkl'))]
         if ticker not in currents:
             con = sa.create_engine('sqlite:///edgar_htm_idx.db').connect()
             print('Getting ticker indices for', ticker)
-            ticker_df = pd.read_sql('select *, tc.* from idx inner join tickercik tc on tc.CIK=idx.cik where tc.Ticker="{}" and type in ("10-K","10-Q")'.format(ticker), con)
+            cik = getCIK(ticker)
+            ticker_df = pd.read_sql('select * from idx where cik={} and type in ("10-K","10-Q","20-F")'.format(cik), con)
             print('Getting xbrl paths')
             ticker_df['xbrl_path'] = ticker_df.path.apply(get_xbrl_path)
             print('Getting current dataframes')
             df_currents = pd.DataFrame()
-            for xbrl_path in ticker_df.xbrl_path.dropna():
+            for xbrl_path, cik, report_date, report_type in ticker_df[['xbrl_path','cik','date','type']].dropna().values:
                 print(xbrl_path)
                 try:
-                    df_currents = df_currents.append(get_current_df(xbrl_path), ignore_index=True)
+                    df_t = get_current_df(xbrl_path)
+                    df_t['Ticker'] = ticker
+                    df_t['cik'] = cik
+                    df_t['ReportDate'] = report_date
+                    df_t['ReportType'] = report_type
+                    df_currents = df_currents.append(df_t, ignore_index=True)
                 except Exception as e:
                     print(e)
                     continue
 
-            df_currents.drop('Fact',1).to_pickle('currents/{}.pkl'.format(ticker))
+            df_currents.drop('Fact',1).to_pickle(os.path.join(outdir,'{}.pkl'.format(ticker)))
             con.close()
         return
     except Exception as e:
         print(e)
         return
-        
-#         dirpath = '/home/ray/.config/arelle/cache'
 
-#         for filename in os.listdir(dirpath):
-#             filepath = os.path.join(dirpath, filename)
-#             try:
-#                 shutil.rmtree(filepath)
-#             except OSError:
-#                 os.remove(filepath)
-
+def run_tickers(tickers):
+    p = Pool(3)
+    p.map(run, tickers)
+    
 if __name__=='__main__':
-    run(sys.argv[1])
+    if len(sys.argv)>2:
+        outdir = sys.argv[2]
+    else:
+        outdir = 'currents'
+    run(sys.argv[1], outdir)
