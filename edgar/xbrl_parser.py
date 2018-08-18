@@ -9,6 +9,7 @@ import os, sys, shutil
 import numpy as np
 import glob
 from multiprocessing import Pool
+import multiprocessing
 
 def get_xbrl_path(idx_path):
     try:
@@ -22,8 +23,8 @@ def get_xbrl_path(idx_path):
         return np.nan
 
 def get_current_df(xbrl_path):
-    # xbrl_path = get_xbrl_path(F.path.sample().iloc[0])
     arelle = Cntlr.Cntlr()
+    arelle.webCache.cacheDir = '/disk-1/arelle/cache/'
     arelle_xbrl = arelle.modelManager.load(xbrl_path)
 
     arelle_df = pd.DataFrame(data=[(fact,
@@ -55,9 +56,10 @@ def get_current_df(xbrl_path):
                                                     # arelle_df.Category.map(lambda c:not c))] # Could also use "~", which does boolean "not" on the entire column
 
 
-    file_path = arelle.webCache.getfilename(xbrl_path)
-    if os.path.exists(file_path):
-        os.remove(file_path)
+#     file_path = arelle.webCache.getfilename(xbrl_path)
+#     if os.path.exists(file_path):
+#         shutil.move(file_path,os.path.join('/disk-1/arelle/cache',os.path.basename(file_path)))
+        
     
     return arelle_df #current_df
 
@@ -100,7 +102,6 @@ def consolidate_periods(df):
     if len(df_t)>1:
         df_t = df_t.apply(consolidate, 1)
         
-#     df_t = df_t.drop(['startDateTime','endDateTime','Value'],1)
     df_t['Days2'] = (df_t.endDateTime2 - df_t.startDateTime2).dt.days + 1
     df_t['Period2'] = df_t.startDateTime2.dt.strftime('%Y-%m-%d')+df_t.endDateTime2.dt.strftime('%Y-%m-%d')
     
@@ -157,7 +158,7 @@ def run(ticker, outdir='currents'):
         return
 
 def run_tickers(tickers):
-    p = Pool(3)
+    p = Pool(multiprocessing.cpu_count()//2-1)
     p.map(run, tickers)
     
 if __name__=='__main__':
