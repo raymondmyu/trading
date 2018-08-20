@@ -24,7 +24,7 @@ def get_xbrl_path(idx_path):
 
 def get_current_df(xbrl_path):
     arelle = Cntlr.Cntlr()
-    arelle.webCache.cacheDir = '/disk-1/arelle/cache/'
+    arelle.webCache.cacheDir = '/mnt/disks/disk-1/arelle/cache/'
     arelle_xbrl = arelle.modelManager.load(xbrl_path)
 
     arelle_df = pd.DataFrame(data=[(fact,
@@ -108,6 +108,7 @@ def consolidate_periods(df):
     return df_t
 
 def get_consolidated_df(df):
+    df = preprocess_df(df)
     df_t = df.query("isStartEndPeriod").copy()
     df_t = df_t.groupby(['Account','startDateTime']).apply(consolidate_periods).reset_index(drop=True)
     df_t = df_t.drop_duplicates(subset=['Account','startDateTime2','Period2'], keep='last')
@@ -158,7 +159,9 @@ def run(ticker, outdir='currents'):
         return
 
 def run_tickers(tickers):
-    p = Pool(multiprocessing.cpu_count()//2-1)
+    num_processes = multiprocessing.cpu_count()//2-2
+    print('Num Processes:',num_processes)
+    p = Pool(num_processes)
     p.map(run, tickers)
     
 if __name__=='__main__':
