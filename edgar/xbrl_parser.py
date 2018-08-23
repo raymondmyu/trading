@@ -81,7 +81,11 @@ def preprocess_df(df):
     df.Value = df.Value.astype(float)
     df.Account = df.Account.astype(str)
     df['endDateTime2'] = df.endDateTime - pd.offsets.Day()
-    df = df[df.Category==False]
+    df.isStartEndPeriod = df.isStartEndPeriod.astype(bool)
+    df.isForeverPeriod = df.isForeverPeriod.astype(bool)
+    df.isInstantPeriod = df.isInstantPeriod.astype(bool)
+    
+#     df = df[df.Category==False]
     return df
     
 def consolidate_periods(df):
