@@ -7,7 +7,7 @@ import re
 import json, glob
 from config_ignore import auth
 
-def run_sectors(sectors, percentile_from=.5, percentile_to=1):
+def get_percentile_filtered_df(percentile_from=.5, percentile_to=1):
     tickers_df = pd.read_csv('tickers.csv')
     sector_quantiles = tickers_df.groupby('Sector').MarketCap.quantile([percentile_from, percentile_to])
     sector_quantiles = sector_quantiles.unstack()
@@ -15,9 +15,14 @@ def run_sectors(sectors, percentile_from=.5, percentile_to=1):
     tickers_df.groupby('Sector').apply(lambda df: df[(df.MarketCap>=sector_quantiles.loc[df.Sector.iloc[0]].iloc[0])&(df.MarketCap<=sector_quantiles.loc[df.Sector.iloc[0]].iloc[1])].sort_values('MarketCap',ascending=False))\
               .reset_index(drop=True)
     
-    tickers = df_percentile_filtered[df_percentile_filtered.Sector.isin(sectors)].Symbol
+    return df_percentile_filtered
     
+def run_sectors(sectors):
+    df_percentile_filtered = get_percentile_filtered_df()
+    tickers = df_percentile_filtered[df_percentile_filtered.Sector.isin(sectors)].Symbol
     get_financials(tickers)
+    
+    return
     
 
 def request_and_store(ticker,quarter,statement,page,count):
@@ -35,12 +40,16 @@ def request_and_store(ticker,quarter,statement,page,count):
         print(ticker, quarter, statement, page)
         resp = requests.get('https://api.intrinio.com/financials/standardized', params=params, auth=auth)
         dic = json.loads(resp.content)
-        if dic.get('error'):
+        if dic.get('errors'):
             print(dic)
             stopticker = 2
-            return total_pages, count, stopticker
+            return None, count, stopticker
         stopticker = (int(dic['result_count']) == 0) & (statement=='income_statement')
         count += 1
+        
+        # Store
+        dic2 = dict(dic, **params)
+        json.dump(dic2, open(fpath,'w'))        
     else:
         try:
             dic = json.load(open(fpath))
@@ -49,10 +58,6 @@ def request_and_store(ticker,quarter,statement,page,count):
             print(e, fpath)
     
     total_pages = dic['total_pages']
-    
-    # Store
-    dic2 = dict(dic, **params)
-    json.dump(dic2, open(fpath,'w'))
     
     return total_pages, count, stopticker
 
