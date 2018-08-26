@@ -5,6 +5,20 @@ import json
 import os
 import re
 import json, glob
+from config_ignore import auth
+
+def run_sectors(sectors, percentile_from=.5, percentile_to=1):
+    tickers_df = pd.read_csv('tickers.csv')
+    sector_quantiles = tickers_df.groupby('Sector').MarketCap.quantile([percentile_from, percentile_to])
+    sector_quantiles = sector_quantiles.unstack()
+    df_percentile_filtered = \
+    tickers_df.groupby('Sector').apply(lambda df: df[(df.MarketCap>=sector_quantiles.loc[df.Sector.iloc[0]].iloc[0])&(df.MarketCap<=sector_quantiles.loc[df.Sector.iloc[0]].iloc[1])].sort_values('MarketCap',ascending=False))\
+              .reset_index(drop=True)
+    
+    tickers = df_percentile_filtered[df_percentile_filtered.Sector.isin(sectors)].Symbol
+    
+    get_financials(tickers)
+    
 
 def request_and_store(ticker,quarter,statement,page,count):
     params = dict(identifier=ticker,
@@ -19,8 +33,12 @@ def request_and_store(ticker,quarter,statement,page,count):
     # Request
     if not os.path.exists(fpath):
         print(ticker, quarter, statement, page)
-        resp = requests.get('https://api.intrinio.com/financials/standardized', params=params, auth=('1f3ea4c3c63c5785750626ea97e9bc87', '63d202d4187ad187a26d452909ac16f9'))
+        resp = requests.get('https://api.intrinio.com/financials/standardized', params=params, auth=auth)
         dic = json.loads(resp.content)
+        if dic.get('error'):
+            print(dic)
+            stopticker = 2
+            return total_pages, count, stopticker
         stopticker = (int(dic['result_count']) == 0) & (statement=='income_statement')
         count += 1
     else:
@@ -52,15 +70,17 @@ def get_financials(tickers, yearstart=2010, quarters = None, statements = ['inco
                 while page <= total_pages:                
                     total_pages, count, stopticker = request_and_store(ticker,quarter,statement,page,count)
                     page += 1
-                    if stopticker:
+                    if stopticker > 0:
                         print('stopped', ticker, quarter, statement)
                         break
-                if stopticker:
+                if stopticker>0:
                     break
-            if stopticker:
+            if stopticker>0:
                 break
-        if stopticker:
+        if stopticker == 1:
             continue
+        elif stopticker == 2:
+            break
 
     return count
 
