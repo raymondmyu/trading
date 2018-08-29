@@ -3,7 +3,6 @@ import os, glob
 import tqdm
 from multiprocessing import Pool
 
-requests = []
 def get_request(f):
     return dict(filename=os.path.basename(f), contents=json.load(open(f,'r')))
 
