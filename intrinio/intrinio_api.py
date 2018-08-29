@@ -6,6 +6,11 @@ import os
 import re
 import json, glob
 from config_ignore import auth
+from pymongo import MongoClient
+
+client = MongoClient()
+db = client.financials
+requests_coll = db.requests
 
 def get_percentile_filtered_df(percentile_from=.5, percentile_to=1):
     tickers_df = pd.read_csv('tickers.csv')
@@ -36,7 +41,7 @@ def request_and_store(ticker,quarter,statement,page,count):
     fpath = os.path.join('financials','requests',fname)
     
     # Request
-    if not os.path.exists(fpath):
+    if requests_coll.find({'filename':fname}).limit(1).count(with_limit_and_skip=True)<=0:
         print(ticker, quarter, statement, page)
         resp = requests.get('https://api.intrinio.com/financials/standardized', params=params, auth=auth)
         dic = json.loads(resp.content)
@@ -49,12 +54,14 @@ def request_and_store(ticker,quarter,statement,page,count):
         
         # Store
         dic2 = dict(dic, **params)
-        json.dump(dic2, open(fpath,'w'))        
+        requests_coll.insert_one(dict(filename=fname, contents=dic2))
+        
     else:
         try:
-            dic = json.load(open(fpath))
+            dic = requests_coll.find_one({'filename':fname}).get('contents')
             stopticker = (int(dic['result_count']) == 0) & (statement=='income_statement')
         except Exception as e:
+            os.remove(fpath)
             print(e, fpath)
     
     total_pages = dic['total_pages']
