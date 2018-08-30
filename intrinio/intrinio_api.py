@@ -12,8 +12,8 @@ client = MongoClient()
 db = client.financials
 requests_coll = db.requests
 
-def get_percentile_filtered_df(percentile_from=.5, percentile_to=1):
-    tickers_df = pd.read_csv('tickers.csv')
+def get_percentile_filtered_df(percentile_from=.5, percentile_to=1, fpath='tickers.csv'):
+    tickers_df = pd.read_csv(fpath)
     sector_quantiles = tickers_df.groupby('Sector').MarketCap.quantile([percentile_from, percentile_to])
     sector_quantiles = sector_quantiles.unstack()
     df_percentile_filtered = \
@@ -96,11 +96,7 @@ def get_financials(tickers, yearstart=2010, quarters = None, statements = ['inco
 
     return count
 
-def get_df(ticker):
-    dics = [json.load(open(f)) for f in glob.glob('financials/requests/{}_*.json'.format(ticker))]
-    if len(dics) == 0:
-        count = get_financials([ticker])
-        dics = [json.load(open(f)) for f in glob.glob('financials/requests/{}*.json'.format(ticker))]
+def get_df(dics):
     df = pd.DataFrame(dics)
     df = df[df.result_count>0]
     df_t = df.data.apply(lambda x: pd.DataFrame(x).set_index('tag').iloc[:,0])
