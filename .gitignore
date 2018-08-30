@@ -108,3 +108,5 @@ venv.bak/
 **/*.zip
 **/*.json
 **/*_ignore.py
+**/*.bson
+**/mongo/data/*
