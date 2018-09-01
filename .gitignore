@@ -110,3 +110,4 @@ venv.bak/
 **/*_ignore.py
 **/*.bson
 **/mongo/data/*
+**/longform.csv
