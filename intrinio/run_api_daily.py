@@ -3,7 +3,7 @@ import numpy as np
 from pymongo import MongoClient
 from intrinio_api import run_sectors, get_percentile_filtered_df
 
-client = MongoClient(host='mongodb://datascience.imwithyu.com', port=27017)
+client = MongoClient()
 db = client.financials
 requests_coll = db.requests
 
