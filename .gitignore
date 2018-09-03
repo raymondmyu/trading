@@ -111,3 +111,4 @@ venv.bak/
 **/*.bson
 **/mongo/data/*
 **/longform.csv
+**/each_ticker_model.pkl
