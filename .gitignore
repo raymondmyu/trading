@@ -102,7 +102,6 @@ venv.bak/
 
 # mypy
 .mypy_cache/
-**/*.pkl
 **/*.out
 **/*.db
 **/*.zip
